@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pulsed Laser SEE Lab: digital and analog</title>
+<style>
+:root{--bg:#f3f5f8;--card:#fff;--tx:#121722;--mut:#5a6577;--bd:#d9dee6;--ac:#1d4ed8;--hot:#dc2626;--warn:#d97706;--ok:#059669;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0f17;--card:#141b27;--tx:#e8edf5;--mut:#93a0b5;--bd:#26324a;--ac:#6aa0ff;--hot:#f87171;--warn:#fbbf24;--ok:#34d399;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0f17;--card:#141b27;--tx:#e8edf5;--mut:#93a0b5;--bd:#26324a;--ac:#6aa0ff;--hot:#f87171;--warn:#fbbf24;--ok:#34d399;color-scheme:dark}
+*{box-sizing:border-box}[hidden]{display:none!important}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:16px 14px 40px}
+h1{font:700 1.45rem/1.2 Georgia,"Times New Roman",serif;margin:4px 0}
+h2{font:600 1rem/1.3 Georgia,serif;margin:12px 0 6px}
+.sub{color:var(--mut);margin:0 0 14px;max-width:66ch}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+canvas{width:100%;height:auto;display:block;border-radius:8px;touch-action:manipulation}
+#arr{cursor:crosshair;touch-action:none}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0}
+button,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:6px 12px;cursor:pointer}
+button.on,button.go{background:var(--ac);color:#fff;border-color:var(--ac)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.ctrl{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 18px}
+.ctrl label{display:block;font-size:.88rem;color:var(--mut)}
+.ctrl label b{color:var(--tx);font-weight:600;float:right}
+input[type=range]{width:100%;accent-color:var(--ac)}
+.met{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin:10px 0}
+.m{border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+.m span{display:block;font-size:.78rem;color:var(--mut)}
+.m strong{font:600 1.1rem/1.3 Georgia,serif}
+.note{font-size:.82rem;color:var(--mut)}
+.bad{color:var(--hot)}.ok{color:var(--ok)}
+</style></head><body><main>
+<h1>Pulsed-laser single event effects</h1>
+<p class="sub">Laser testing mimics ion strikes: a focused picosecond pulse creates electron-hole pairs in silicon. Tune the beam, then fire it at a digital SRAM array or an analog op-amp / comparator and explore the graphs (hover for readouts, tap a sweep graph to set the energy).</p>
+
+<div class="card">
+<div class="ctrl">
+<label>Wavelength<select id="wl" style="width:100%"><option value="1064" selected>1064 nm (weakly absorbed)</option><option value="800">800 nm (strongly absorbed)</option></select></label>
+<label>Illumination side<select id="sd" style="width:100%"><option value="b" selected>Backside (through substrate)</option><option value="f">Frontside (through metal)</option></select></label>
+<label>Pulse energy <b id="env"></b><input id="en" type="range" min="0" max="4.5" step="0.01" value="2"></label>
+<label>Spot size FWHM <b id="spv"></b><input id="sp" type="range" min="1" max="10" step="0.1" value="3"></label>
+<label>Substrate thickness <b id="tsv"></b><input id="ts" type="range" min="50" max="400" step="10" value="100"></label>
+<label>Technology node <b id="ndv"></b><select id="nd" style="width:100%"><option>28</option><option>45</option><option selected>65</option><option>130</option><option>250</option></select></label>
+<label>Supply voltage Vdd <b id="vdv"></b><input id="vd" type="range" min="0.6" max="5" step="0.05" value="1.2"></label>
+</div>
+<div class="met">
+<div class="m"><span>Light reaching junction</span><strong id="tr1"></strong></div>
+<div class="m"><span>Charge at beam center</span><strong id="q0"></strong></div>
+<div class="m"><span>Equivalent LET</span><strong id="le"></strong></div>
+</div>
+<p class="note" id="wn"></p>
+</div>
+
+<div class="row"><button id="tD" class="on">Digital: SRAM array</button><button id="tA">Analog: op-amp / comparator</button></div>
+
+<section id="dig" class="card">
+<div class="row"><button class="go" id="scan">Scan whole array</button><button id="clr">Clear map</button><span class="note">Tap or drag on the array to place and fire the beam.</span></div>
+<canvas id="arr" aria-label="SRAM array under laser spot"></canvas>
+<div class="met">
+<div class="m"><span>Bits flipped</span><strong id="mf"></strong></div>
+<div class="m"><span>Qcrit (nominal)</span><strong id="mq"></strong></div>
+<div class="m"><span>Threshold energy (on drain)</span><strong id="me"></strong></div>
+</div>
+<h2>Upset count vs. laser energy</h2>
+<canvas id="swD" aria-label="Bit flips versus laser energy"></canvas>
+<p class="note">Cells have slightly different Qcrit (process mismatch), so the curve rises gradually. Larger spots flip neighbours (multi-bit upsets). Hover to read values, tap to set the energy.</p>
+</section>
+
+<section id="ana" class="card" hidden>
+<div class="ctrl">
+<label>Device<select id="dev" style="width:100%"><option value="o" selected>Op-amp (voltage follower)</option><option value="c">Comparator</option></select></label>
+<label>Gain-bandwidth <b id="gbv"></b><input id="gb" type="range" min="0" max="3" step="0.01" value="2"></label>
+<label>Spot offset from sensitive transistor <b id="ofv"></b><input id="of" type="range" min="0" max="8" step="0.1" value="0"></label>
+</div>
+<div class="row note">Traces:
+<label><input type="checkbox" id="k1" checked> output / node ΔV</label>
+<label><input type="checkbox" id="k2" checked> current pulse</label>
+<label><input type="checkbox" id="k3" checked> comparator output</label></div>
+<canvas id="tr" aria-label="Analog single event transient"></canvas>
+<div class="met">
+<div class="m"><span>Peak ΔV (SET amplitude)</span><strong id="pk"></strong></div>
+<div class="m"><span>Width at half max</span><strong id="fw"></strong></div>
+<div class="m"><span>Loop time constant</span><strong id="ta"></strong></div>
+<div class="m"><span>Comparator output</span><strong id="cg"></strong></div>
+</div>
+<h2 id="sh">Transient vs. laser energy</h2>
+<canvas id="swA" aria-label="Transient size versus laser energy"></canvas>
+<p class="note">A laser-induced analog single-event transient is the charge pulse filtered by the circuit's bandwidth: fast amplifiers pass a tall, narrow spike (clipped at the rails); slow ones give a small, long ripple. Time axis is logarithmic.</p>
+</section>
+
+<script>
+const $=id=>document.getElementById(id);
+const dpr=Math.min(window.devicePixelRatio||1,2);
+const mk=(id,h)=>{const k=$(id);k.width=700*dpr;k.height=h*dpr;const x=k.getContext('2d');x.scale(dpr,dpr);return x};
+const cA=mk('arr',262),cSD=mk('swD',250),cT=mk('tr',290),cSA=mk('swA',250);
+const COLS=24,ROWS=9,PIT=1.2,SCL=22,AX=(700-COLS*PIT*SCL)/2,AY=11,NC=COLS*ROWS,EM=4.5;
+const rnd=Array.from({length:NC},()=>Math.random()),ref=Array.from({length:NC},()=>Math.random()<.5?1:0);
+let tab='d',HV={},Dg={fl:new Array(NC).fill(false),sx:COLS*PIT/2,sy:ROWS*PIT/2,scan:null,Es:[],ns:[]},An={},dirty=true;
+const fE=E=>E<1e3?E.toFixed(E<10?1:0)+' pJ':(E/1e3).toFixed(1)+' nJ';
+const fT=t=>t<1e3?t.toFixed(0)+' ps':t<1e6?(t/1e3).toFixed(t<1e4?1:0)+' ns':(t/1e6).toFixed(1)+' µs';
+function par(){return{E:Math.pow(10,+$('en').value),d:+$('sp').value,t:+$('ts').value,wl:$('wl').value,side:$('sd').value,node:+$('nd').value,vdd:+$('vd').value,gbw:Math.pow(10,+$('gb').value),dev:$('dev').value,off:+$('of').value}}
+function absorb(p){const al=p.wl==='1064'?15:850,eph=p.wl==='1064'?1.165:1.55,tp=p.side==='b'?Math.exp(-al*p.t*1e-4):.35;return{eph,tp,abs:.7*tp*(1-Math.exp(-al*1e-4))}}
+function q0(E,p,r){const a=absorb(p),w=p.d/1.177*1e-4,F=2*E*1e-12/(Math.PI*w*w);return F*1e-8/a.eph*1e15*a.abs*Math.exp(-4*Math.LN2*(r||0)*(r||0)/(p.d*p.d))}
+const qc=p=>.05*p.node*p.vdd;
+function evalAt(p,x,y,E){const fl=[];let n=0;for(let i=0;i<NC;i++){const r=Math.hypot((i%COLS+.5)*PIT-x,(Math.floor(i/COLS)+.5)*PIT-y),f=q0(E,p,r)>qc(p)*(.85+.3*rnd[i]);fl.push(f);if(f)n++}return{fl,n}}
+function simA(Q,p){const tf=40+1.1*p.node,tau=1.59e5/p.gbw,Rt=100,thr=.1*p.vdd,treg=150*p.node/65;
+ const pl=t=>.85*Q/(tf-8)*(Math.exp(-t/tf)-Math.exp(-t/8))+.15*Q/700*(Math.exp(-t/800)-Math.exp(-t/100));
+ const Tw=Math.max(2000,10*tau+3000),T=[],dv=[],I=[],C=[];let t=0,v=0,la=-1e18,pk=0,gw=0,imax=0,pt=0;
+ while(t<Tw){const i=pl(t),y=Math.max(-p.vdd/2,Math.min(p.vdd/2,v));if(y>thr)la=t;const o=t-la<treg?p.vdd:0;
+  T.push(t);dv.push(y);I.push(i);C.push(o);if(Math.abs(y)>pk)pk=Math.abs(y);if(i>imax)imax=i;if(o&&T.length>1)gw+=t-pt;pt=t;
+  const dt=Math.min(Math.max(1,t*.01),tau*.2);v+=dt*(-v+Rt*i)/tau;t+=dt}
+ let f0=-1,f1=-1;if(pk>0)for(let k=0;k<T.length;k++)if(Math.abs(dv[k])>=pk/2){if(f0<0)f0=T[k];f1=T[k]}
+ return{T,dv,I,C,pk,gw,fw:f0<0?0:f1-f0,imax,tau,Tw}}
+function calc(){const p=par(),a=absorb(p),Q0=q0(p.E,p,0);
+ $('env').textContent=fE(p.E);$('spv').textContent=p.d.toFixed(1)+' µm';$('tsv').textContent=p.t+' µm';$('ndv').textContent=p.node+' nm';$('vdv').textContent=p.vdd.toFixed(2)+' V';
+ $('gbv').textContent=p.gbw.toFixed(p.gbw<10?1:0)+' MHz';$('ofv').textContent=p.off.toFixed(1)+' µm';
+ $('tr1').textContent=(a.abs*100).toExponential(1).replace('e-','e−')+' %';$('q0').textContent=Q0.toFixed(Q0<10?2:1)+' fC';$('le').textContent=(Q0/10.8).toFixed(2)+' MeV·cm²/mg';
+ $('wn').textContent=p.wl==='800'&&p.side==='b'?'800 nm is absorbed in the substrate before reaching the junction: nothing happens from the backside. Use frontside, or switch to 1064 nm.':p.side==='f'?'Frontside: metal layers shadow the sensitive area (35% average transmission).':'Backside at 1064 nm: weak absorption, so charge is deposited uniformly in depth like a heavy ion.';
+ const e=evalAt(p,Dg.sx,Dg.sy,p.E);if(!Dg.scan)Dg.fl=e.fl;
+ Dg.Es=[];Dg.ns=[];for(let i=0;i<50;i++){const E=Math.pow(10,i*EM/49);Dg.Es.push(E);Dg.ns.push(evalAt(p,Dg.sx,Dg.sy,E).n)}
+ $('mq').textContent=qc(p).toFixed(2)+' fC';const q1=q0(1,p,0);$('me').textContent=q1>0?fE(qc(p)/q1):'unreachable';
+ An=simA(q0(p.E,p,p.off),p);An.Is=An.I.map(v=>v/(An.imax||1)*p.vdd*.45);
+ An.Es=[];An.sy=[];for(let i=0;i<50;i++){const E=Math.pow(10,i*EM/49),r=simA(q0(E,p,p.off),p);An.Es.push(E);An.sy.push(p.dev==='c'?r.gw:r.pk)}
+ $('pk').textContent=An.pk.toFixed(2)+' V'+(An.pk>=p.vdd/2*.999?' (rail)':'');$('fw').textContent=An.fw?fT(An.fw):'none';$('ta').textContent=fT(An.tau);
+ const cg=$('cg');if(p.dev==='c'){cg.textContent=An.gw>0?'glitch '+fT(An.gw):'no error';cg.className=An.gw>0?'bad':'ok'}else{cg.textContent='n/a';cg.className=''}
+ $('sh').textContent=p.dev==='c'?'Comparator glitch width vs. laser energy':'Peak SET amplitude vs. laser energy';
+ dirty=true}
+function plot(c,o){const cs=getComputedStyle(document.documentElement),g=v=>cs.getPropertyValue(v).trim();
+ const W=700,H=o.h,L=60,R=688,T=18,B=H-36,w=R-L,h=B-T,a0=Math.log10(o.x0),a1=Math.log10(o.x1);
+ const X=x=>L+(Math.log10(Math.max(x,o.x0))-a0)/(a1-a0)*w,Y=y=>B-(y-o.y0)/(o.y1-o.y0)*h;
+ c.clearRect(0,0,W,H);c.font='11px sans-serif';c.lineWidth=1;c.setLineDash([]);c.strokeStyle=g('--bd');c.fillStyle=g('--mut');
+ for(let k=Math.ceil(a0);k<=a1;k++){const x=X(Math.pow(10,k));c.beginPath();c.moveTo(x,T);c.lineTo(x,B);c.stroke();c.fillText(o.fx(Math.pow(10,k)),x-16,B+14)}
+ for(let k=0;k<=4;k++){const v=o.y0+(o.y1-o.y0)*k/4,y=Y(v);c.beginPath();c.moveTo(L,y);c.lineTo(R,y);c.stroke();c.fillText(o.fy(v),2,y+4)}
+ c.fillText(o.xl,L+w/2-50,H-6);c.fillText(o.yl,L,11);
+ c.save();c.beginPath();c.rect(L,T,w,h);c.clip();
+ for(const s of o.series){if(s.show===false)continue;c.strokeStyle=g(s.col);c.lineWidth=2;c.setLineDash(s.dash?[5,4]:[]);c.beginPath();let st=0;
+  o.xs.forEach((x,i)=>{if(x<o.x0)return;const px=X(x),py=Y(s.y[i]);st++?c.lineTo(px,py):c.moveTo(px,py)});c.stroke()}
+ c.setLineDash([4,4]);c.lineWidth=1;for(const l of o.hl||[]){c.strokeStyle=g(l.col);c.beginPath();c.moveTo(L,Y(l.y));c.lineTo(R,Y(l.y));c.stroke();c.fillStyle=g(l.col);c.fillText(l.label,R-130,Y(l.y)-4)}
+ if(o.mark){c.strokeStyle=g('--hot');c.beginPath();c.moveTo(X(o.mark),T);c.lineTo(X(o.mark),B);c.stroke()}
+ c.restore();c.setLineDash([]);
+ if(o.hx!=null&&o.hx>=L&&o.hx<=R){const xv=Math.pow(10,a0+(o.hx-L)/w*(a1-a0));let bi=0,bd=1e99;
+  o.xs.forEach((x,i)=>{const dd=Math.abs(Math.log10(Math.max(x,o.x0))-Math.log10(xv));if(dd<bd){bd=dd;bi=i}});
+  const px=X(o.xs[bi]);c.strokeStyle=g('--mut');c.beginPath();c.moveTo(px,T);c.lineTo(px,B);c.stroke();
+  const vis=o.series.filter(s=>s.show!==false),lines=[o.fx(o.xs[bi])].concat(vis.map(s=>s.label+': '+o.fy(s.y[bi])));
+  for(const s of vis){c.fillStyle=g(s.col);c.beginPath();c.arc(px,Y(s.y[bi]),4,0,6.3);c.fill()}
+  const bw=170,bh=8+lines.length*15,bx=px+10+bw>R?px-bw-10:px+10;c.fillStyle=g('--card');c.strokeStyle=g('--bd');c.fillRect(bx,T+4,bw,bh);c.strokeRect(bx,T+4,bw,bh);
+  c.fillStyle=g('--tx');lines.forEach((t,i)=>c.fillText(t,bx+6,T+19+i*15))}}
+function drawArr(){const p=par(),c=cA;c.fillStyle='#0b1220';c.fillRect(0,0,700,262);
+ for(let i=0;i<NC;i++){const x=AX+(i%COLS)*PIT*SCL,y=AY+Math.floor(i/COLS)*PIT*SCL,s=PIT*SCL-2,f=Dg.fl[i];
+  c.fillStyle=f?'#dc2626':ref[i]?'#2f5fc4':'#1e2f4d';c.fillRect(x+1,y+1,s,s);
+  c.fillStyle='rgba(255,255,255,.7)';c.font='10px monospace';c.fillText(f?(ref[i]^1):ref[i],x+s/2-2,y+s/2+4)}
+ const sx=AX+Dg.sx*SCL,sy=AY+Dg.sy*SCL,R=p.d*SCL,gr=c.createRadialGradient(sx,sy,0,sx,sy,R);
+ gr.addColorStop(0,'rgba(255,90,90,.6)');gr.addColorStop(1,'rgba(255,90,90,0)');c.fillStyle=gr;c.beginPath();c.arc(sx,sy,R,0,6.3);c.fill();
+ c.strokeStyle='#fca5a5';c.setLineDash([4,3]);c.lineWidth=1.5;c.beginPath();c.arc(sx,sy,p.d/2*SCL,0,6.3);c.stroke();c.setLineDash([]);
+ c.fillStyle='#8aa0c0';c.font='11px sans-serif';c.fillText('Dashed circle = beam FWHM. Red cells have flipped.',8,256);
+ $('mf').textContent=Dg.fl.filter(Boolean).length+' / '+NC}
+function render(){const p=par();
+ if(tab==='d'){drawArr();plot(cSD,{h:250,x0:1,x1:Math.pow(10,EM),xs:Dg.Es,y0:0,y1:NC,mark:p.E,hx:HV.swD,fx:fE,fy:v=>v.toFixed(0)+' bits',xl:'Pulse energy',yl:'Bits flipped (beam at current position)',series:[{y:Dg.ns,col:'--ac',label:'flipped'}]})}
+ else{const dc=p.dev==='c';
+  plot(cT,{h:290,x0:10,x1:An.Tw,xs:An.T,y0:-p.vdd*.55,y1:dc?p.vdd*1.1:p.vdd*.55,hx:HV.tr,fx:fT,fy:v=>v.toFixed(2)+' V',xl:'Time after pulse',yl:'Voltage (V)',
+   hl:dc?[{y:.1*p.vdd,col:'--mut',label:'comparator threshold'}]:[],
+   series:[{y:An.dv,col:'--ac',label:'ΔV',show:$('k1').checked},{y:An.Is,col:'--hot',label:'I(t) scaled',dash:1,show:$('k2').checked},{y:An.C,col:'--warn',label:'Comp. out',show:dc&&$('k3').checked}]});
+  const ym=dc?Math.max(1,...An.sy)*1.1:p.vdd/2;
+  plot(cSA,{h:250,x0:1,x1:Math.pow(10,EM),xs:An.Es,y0:0,y1:ym,mark:p.E,hx:HV.swA,fx:fE,fy:dc?v=>fT(v):v=>v.toFixed(2)+' V',xl:'Pulse energy',yl:dc?'Output glitch width':'Peak ΔV',series:[{y:An.sy,col:dc?'--warn':'--ac',label:dc?'glitch':'peak'}]})}}
+function frame(){if(Dg.scan){const s=Dg.scan;for(let k=0;k<6&&s.i<NC;k++){const i=s.i++;Dg.sx=(i%COLS+.5)*PIT;Dg.sy=(Math.floor(i/COLS)+.5)*PIT;evalAt(s.p,Dg.sx,Dg.sy,s.p.E).fl.forEach((f,j)=>{if(f)Dg.fl[j]=true})}if(s.i>=NC)Dg.scan=null;dirty=true}
+ if(dirty){dirty=false;render()}requestAnimationFrame(frame)}
+const px=(k,e)=>{const r=k.getBoundingClientRect();return(e.clientX-r.left)/r.width*700};
+$('arr').addEventListener('pointerdown',e=>place(e));$('arr').addEventListener('pointermove',e=>{if(e.buttons)place(e)});
+function place(e){const x=(px($('arr'),e)-AX)/SCL,y=((e.clientY-$('arr').getBoundingClientRect().top)/$('arr').getBoundingClientRect().height*262-AY)/SCL;Dg.scan=null;Dg.sx=Math.max(0,Math.min(COLS*PIT,x));Dg.sy=Math.max(0,Math.min(ROWS*PIT,y));calc()}
+for(const id of['swD','swA','tr']){const k=$(id);k.addEventListener('pointermove',e=>{HV[id]=px(k,e);dirty=true});k.addEventListener('pointerleave',()=>{HV[id]=null;dirty=true});
+ if(id!=='tr')k.addEventListener('pointerdown',e=>{const x=px(k,e);if(x<60||x>688)return;$('en').value=Math.max(0,Math.min(EM,(x-60)/628*EM));calc()})}
+$('scan').onclick=()=>{Dg.scan={i:0,p:par()};Dg.fl=new Array(NC).fill(false)};
+$('clr').onclick=()=>{Dg.scan=null;Dg.fl=new Array(NC).fill(false);dirty=true};
+document.querySelectorAll('input[type=range],select').forEach(e=>e.addEventListener('input',()=>{if(Dg.scan)Dg.scan=null;calc()}));
+for(const id of['k1','k2','k3'])$(id).onchange=()=>dirty=true;
+function setTab(t){tab=t;$('dig').hidden=t!=='d';$('ana').hidden=t!=='a';$('tD').classList.toggle('on',t==='d');$('tA').classList.toggle('on',t==='a');dirty=true}
+$('tD').onclick=()=>setTab('d');$('tA').onclick=()=>setTab('a');
+calc();requestAnimationFrame(frame);
+</script></main></body></html>
